@@ -63,6 +63,10 @@ utime.sleep(5)  # Wait to view
 epd.sleep()
 ```
 
+### Working example with my own image converted to 1-bit BMP fiel with 250 x 120
+<img width="992" height="500" alt="image" src="https://github.com/user-attachments/assets/826b58de-df10-4dce-b930-421275b0c90d" />
+
+
 ### Notes
 - BMP files must be 1-bit monochrome and uncompressed. Use tools like GIMP or ImageMagick to convert images.
 - For looping displays (e.g., multiple images), wrap the `display_bmp` calls in a `while` loop with `utime.sleep()` to avoid frequent refreshes (e-paper is low-power but slow).
