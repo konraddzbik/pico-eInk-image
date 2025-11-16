@@ -38,7 +38,7 @@ Ideal for projects involving e-paper displays on microcontrollers like Raspberry
 Here's a simple script to initialize the display and show a BMP image. Save this as `main.py` and run it on your device.
 
 ```python
-from eInk213 import eInk213  # Import your extended class
+from eInkHelper import eInk213  # Import your extended class
 import utime
 
 # Initialize the display
