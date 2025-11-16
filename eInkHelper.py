@@ -142,3 +142,10 @@ class eInk213(EPD_2in13_V4_Portrait):
             except Exception as e:
                 print("Error displaying BMP:", e)
 
+# Usage example
+if __name__ == "__main__":
+    epd = eInk213()
+    epd.display_bmp("example.bmp")  # 
+    # Display the buffer (assuming you have a display method)
+    # epd.display(epd.buffer)
+
