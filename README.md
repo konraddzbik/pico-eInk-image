@@ -2,6 +2,8 @@
 
 This repository provides an extension to the Waveshare EPD_2in13_V4 e-paper display driver for MicroPython. The `eInk213` class inherits from `EPD_2in13_V4_Portrait` and adds a custom `display_bmp` method to load, process, auto-rotate (if needed), scale, and display 1-bit BMP images on the e-paper screen. It handles bottom-up/top-down BMP formats, padding, and simple nearest-neighbor scaling for a better fit.
 
+<img width="1200" height="600" alt="image" src="https://github.com/user-attachments/assets/17d746a4-6377-4dd6-ad08-106af298a197" />
+
 Ideal for projects involving e-paper displays on microcontrollers like Raspberry Pi Pico, where you want to show images alongside text or sensor data.
 
 ## Features
@@ -17,6 +19,7 @@ Ideal for projects involving e-paper displays on microcontrollers like Raspberry
 - Waveshare e-paper library: Specifically, `lib.ePaper.ePaper213v4` module (download from [Waveshare Wiki](https://www.waveshare.com/wiki/2.13inch_e-Paper_HAT) or their GitHub repo).
 - Hardware: 2.13-inch e-Paper display (V4);
 - Dependencies: Built-in MicroPython modules (`utime`, `struct`). No external pip-installable packages required.
+- 250 x 120 dimensions 
 
 ## Installation
 1. **Download the Code**:
