@@ -19,133 +19,115 @@
 # SOFTWARE.
 
 from lib.ePaper.ePaper213v4 import EPD_2in13_V4_Portrait
-import utime
-import struct  # Added for signed integer unpacking (handles negative BMP heights)
+import struct
+
 
 class eInk213(EPD_2in13_V4_Portrait):
-    def __init__(self):
-        super().__init__()
-        
+
     def display_bmp(self, filename, invert=False):
-            try:
-                with open(filename, "rb") as f:
-                    # Read BMP file header (14 bytes)
-                    file_header = f.read(14)
-                    if len(file_header) < 14 or file_header[0:2] != b'BM':
-                        print("Not a valid BMP file")
-                        return
-                    # Read offset to pixel data
-                    offset = int.from_bytes(file_header[10:14], 'little')
-                    # Read DIB header (at least 40 bytes for BITMAPINFOHEADER)
-                    dib_header = f.read(40)
-                    if len(dib_header) < 40:
-                        print("Invalid DIB header")
-                        return
-                    # Use struct for signed integers (fixes handling of negative height for top-down BMPs)
-                    img_width = struct.unpack('<i', dib_header[4:8])[0]
-                    height_signed = struct.unpack('<i', dib_header[8:12])[0]
-                    # Determine if top-down and get absolute height
-                    if height_signed < 0:
-                        img_height = -height_signed
-                        top_down = True
-                    else:
-                        img_height = height_signed
-                        top_down = False
-                    print(f"BMP: {filename} params W:{img_width} H: {img_height} (top_down: {top_down})")
-                    bits_per_pixel = int.from_bytes(dib_header[14:16], 'little')
-                    compression = int.from_bytes(dib_header[16:20], 'little')
-                    if bits_per_pixel != 1:
-                        print(f"Unsupported bits per pixel: {bits_per_pixel} (only 1-bit supported)")
-                        return
-                    if compression != 0:
-                        print(f"Compression not supported: {compression}")
-                        return
-                    # Seek to pixel data
-                    f.seek(offset)
-                    # Calculate padding per row (to 4-byte boundary)
-                    row_size = ((img_width + 31) // 32) * 4  # bytes per row in file
-                    # Read pixel data into a 2D list (for easier scaling and rotation)
-                    img_data = []
-                    for _ in range(img_height):
-                        row_data = f.read((img_width + 7) // 8)
-                        if len(row_data) < (img_width + 7) // 8:
-                            print("Unexpected end of file")
-                            return
-                        # Skip padding
-                        f.read(row_size - len(row_data))
-                        # Unpack row to list of bits (0 or 1). BMP 1-bit format: MSB (bit 7) is leftmost pixel.
-                        row_bits = []
-                        for byte in row_data:
-                            for bit in range(7, -1, -1):
-                                row_bits.append((byte >> bit) & 1)
-                        img_data.append(row_bits[:img_width])  # Trim extra bits
-                    # Adjust for bottom-up vs top-down to ensure img_data[0] is always the top row
-                    if not top_down:
-                        img_data.reverse()  # For bottom-up BMPs, reverse so [0] = top row
+        try:
+            with open(filename, "rb") as f:
+                w, h, top_down, offset = self._parse_bmp_header(f)
+                f.seek(offset)
+                rows = self._read_pixel_data(f, w, h, top_down)
+        except ValueError as e:
+            print(f"BMP error: {e}")
+            return False
 
-                    # New: Auto-rotate logic for better fit on display
-                    # If image is landscape (w > h) but display is portrait (w < h), rotate 90 degrees clockwise
-                    # Similarly, if image is portrait but display is landscape, rotate (but less common)
-                    # This aligns the longer side of the image with the longer side of the display
-                    display_is_portrait = self.height > self.width
-                    image_is_landscape = img_width > img_height
-                    if (image_is_landscape and display_is_portrait) or (not image_is_landscape and not display_is_portrait):
-                        # Rotate 90 degrees clockwise: Transpose and reverse each new row
-                        new_img_data = []
-                        for x in range(img_width):
-                            new_row = [img_data[y][x] for y in range(img_height - 1, -1, -1)]  # Reverse y for clockwise
-                            new_img_data.append(new_row)
-                        img_data = new_img_data
-                        # Swap dimensions after rotation
-                        img_width, img_height = img_height, img_width
-                        print(f"Auto-rotated image 90 degrees to better fit display (new dims: {img_width}x{img_height})")
+        display_portrait = self.height > self.width
+        image_portrait = h >= w
+        if display_portrait != image_portrait:
+            rows, w, h = self._rotate_90cw(rows, w, h)
 
-                    # Now scale the image to display size (self.width x self.height) without unintended rotation
-                    # Simple nearest-neighbor scaling for 1-bit images.
-                    # Scaling factors: Map display horizontal to image horizontal, vertical to vertical.
-                    # This displays in adjusted orientation, stretching to fit (may distort slightly if aspect ratios don't match).
-                    # Note: For perfect fit without distortion, you could add letterboxing (black borders) by adjusting scales and offsets.
-                    scale_x = self.width / img_width  # Horizontal scaling factor (display width / image width)
-                    scale_y = self.height / img_height  # Vertical scaling factor (display height / image height)
-                    buffer = bytearray(self.height * self.width // 8)
-                    for disp_y in range(self.height):
-                        # Map display y (vertical, 0 = top) to image y (0 = top)
-                        img_y = int(disp_y / scale_y)
-                        img_y = max(0, min(img_height - 1, img_y))  # Clamp to bounds
-                        row_bits = img_data[img_y]
-                        buf_offset = disp_y * (self.width // 8)
-                        byte_index = 0
-                        byte_value = 0
-                        bit_count = 0
-                        for disp_x in range(self.width):
-                            # Map display x (horizontal) to image x
-                            img_x = int(disp_x / scale_x)
-                            img_x = max(0, min(img_width - 1, img_x))  # Clamp to bounds
-                            bit = row_bits[img_x]
-                            if invert:
-                                bit = 1 - bit
-                            byte_value = (byte_value << 1) | bit
-                            bit_count += 1
-                            if bit_count == 8:
-                                buffer[buf_offset + byte_index] = byte_value
-                                byte_index += 1
-                                byte_value = 0
-                                bit_count = 0
-                        # Fill remaining bits in last byte (shift left if partial byte)
-                        if bit_count > 0:
-                            byte_value <<= (8 - bit_count)
-                            buffer[buf_offset + byte_index] = byte_value
-                    # Send to display
-                    self.fill(0xff)  # clear before image
-                    self.displayPartial(buffer)
-                    print(f"BMP displayed: {filename} (scaled from {img_width}x{img_height} to {self.width}x{self.height})")
-            except Exception as e:
-                print("Error displaying BMP:", e)
+        buf = self._scale_to_display(rows, w, h, invert)
+        self.fill(0xff)
+        self.displayPartial(buf)
+        print(f"BMP: {filename} -> {self.width}x{self.height}")
+        return True
 
-# Usage example
+    @staticmethod
+    def _parse_bmp_header(f):
+        file_hdr = f.read(14)
+        if len(file_hdr) < 14 or file_hdr[0:2] != b'BM':
+            raise ValueError("Not a valid BMP file")
+
+        offset = int.from_bytes(file_hdr[10:14], 'little')
+        dib_hdr = f.read(40)
+        if len(dib_hdr) < 40:
+            raise ValueError("Invalid DIB header")
+
+        w = struct.unpack('<i', dib_hdr[4:8])[0]
+        h_signed = struct.unpack('<i', dib_hdr[8:12])[0]
+        top_down = h_signed < 0
+        h = -h_signed if top_down else h_signed
+
+        bpp = int.from_bytes(dib_hdr[14:16], 'little')
+        if bpp != 1:
+            raise ValueError(f"Unsupported bpp: {bpp}")
+        compression = int.from_bytes(dib_hdr[16:20], 'little')
+        if compression != 0:
+            raise ValueError(f"Compression not supported: {compression}")
+
+        return w, h, top_down, offset
+
+    @staticmethod
+    def _read_pixel_data(f, w, h, top_down):
+        row_bytes = (w + 7) // 8
+        padded_row = ((w + 31) // 32) * 4
+        padding = padded_row - row_bytes
+
+        rows = []
+        for _ in range(h):
+            data = f.read(row_bytes)
+            if len(data) < row_bytes:
+                raise ValueError("Unexpected end of file")
+            rows.append(bytearray(data))
+            if padding:
+                f.read(padding)
+
+        if not top_down:
+            rows.reverse()
+        return rows
+
+    @staticmethod
+    def _rotate_90cw(rows, w, h):
+        new_w, new_h = h, w
+        new_row_bytes = (new_w + 7) // 8
+        new_rows = []
+        for x in range(w):
+            row = bytearray(new_row_bytes)
+            for i in range(h):
+                if (rows[h - 1 - i][x >> 3] >> (7 - (x & 7))) & 1:
+                    row[i >> 3] |= 1 << (7 - (i & 7))
+            new_rows.append(row)
+        return new_rows, new_w, new_h
+
+    def _scale_to_display(self, rows, w, h, invert):
+        dw, dh = self.width, self.height
+        # Integer math avoids float on Cortex-M0+ (no FPU)
+        col_src = [min(x * w // dw, w - 1) for x in range(dw)]
+        row_src = [min(y * h // dh, h - 1) for y in range(dh)]
+        col_byte = [col_src[x] >> 3 for x in range(dw)]
+        col_shift = [7 - (col_src[x] & 7) for x in range(dw)]
+
+        stride = dw // 8
+        buf = bytearray(dh * stride)
+        xor = 0xFF if invert else 0x00
+
+        for dy in range(dh):
+            src = rows[row_src[dy]]
+            base = dy * stride
+            for bi in range(stride):
+                val = 0
+                bx = bi << 3
+                for bit in range(8):
+                    px = bx + bit
+                    val = (val << 1) | ((src[col_byte[px]] >> col_shift[px]) & 1)
+                buf[base + bi] = val ^ xor
+
+        return buf
+
+
 if __name__ == "__main__":
     epd = eInk213()
-    epd.display_bmp("example.bmp")  # 
-    # Display the buffer (assuming you have a display method)
-    # epd.display(epd.buffer)
-
+    epd.display_bmp("example.bmp")
